@@ -17,6 +17,7 @@ A Streamlit-based chat application that provides a user-friendly interface for i
   - Dynamic model selection from available xAI models via API
 - 🔌 **Model Context Protocol (MCP) Support**:
   - Configure and use MCP to enhance AI capabilities with external tools
+  - Simple UI for enabling/disabling individual MCP servers
   - Transparent tool usage indicators in responses
   - Support for multiple MCP servers including Brave Search, Perplexity, Tavily, and more
 - ➗ **LaTeX Support**: Proper rendering of mathematical expressions and equations
@@ -74,19 +75,27 @@ The application supports Model Context Protocol (MCP) for enhanced AI capabiliti
 
 1. Enable MCP using the toggle in the sidebar
 2. Configure MCP settings by clicking on the "MCP Settings" expander
-3. Edit the JSON configuration to match your MCP server setup
-4. Save the configuration to apply changes
+3. Toggle individual MCP servers on or off directly in the UI
+4. For advanced configuration, edit the `mcp_settings.json` file directly
 
 The MCP settings are stored in `mcp_settings.json` in the same format as Claude's MCP configuration. For security reasons, this file is excluded from version control as it may contain API keys.
+
+#### MCP Server Management
+
+- **Simple Configuration**: Toggle MCP servers on/off directly in the UI
+- **Advanced Configuration**: Edit the `mcp_settings.json` file for detailed settings
+- **Server Descriptions**: Hover over server names to see descriptions of their capabilities
 
 ### Web Search Integration
 
 The application integrates with Brave Search to provide more informed responses:
 
-1. Enable Web Search using the toggle in the sidebar
+1. Enable Web Search using the toggle in the sidebar (your preference is saved)
 2. The AI will automatically determine when to use search based on your query
 3. Search results are processed and incorporated into the response
 4. A references section is added to responses with citations to the sources used
+
+The web search setting is stored in `settings.json` along with other application preferences, ensuring your choice persists between sessions.
 
 ## ✅ Requirements
 

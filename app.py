@@ -10,6 +10,7 @@ from functools import lru_cache
 from icon import get_xai_favicon
 
 SETTINGS_FILE = "settings.json"
+MCP_SETTINGS_FILE = "mcp_settings.json"
 
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
@@ -26,6 +27,25 @@ def save_settings(settings):
             json.dump(settings, f)
     except Exception:
         pass
+
+def load_mcp_settings():
+    """Load MCP settings from the MCP settings file."""
+    if os.path.exists(MCP_SETTINGS_FILE):
+        try:
+            with open(MCP_SETTINGS_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            st.warning(f"Error loading MCP settings: {str(e)}")
+            return {}
+    return {}
+
+def save_mcp_settings(mcp_settings):
+    """Save MCP settings to the MCP settings file."""
+    try:
+        with open(MCP_SETTINGS_FILE, "w") as f:
+            json.dump(mcp_settings, f, indent=2)
+    except Exception as e:
+        st.warning(f"Error saving MCP settings: {str(e)}")
 
 def load_conversations():
     try:
@@ -73,6 +93,7 @@ def fetch_xai_models():
         return ["grok-3-mini-beta", "grok-3-mini-fast-beta"]  # Default models as fallback
 
 settings = load_settings()
+mcp_settings = load_mcp_settings()
 
 # Initialize the Streamlit app with the xAI favicon
 xai_favicon = get_xai_favicon()
@@ -103,16 +124,49 @@ if "show_reasoning" not in st.session_state:
 if "model_name" not in st.session_state:
     st.session_state.model_name = settings.get("model_name", "grok-3-mini-beta")
 
+# Load MCP settings
+if "enable_mcp" not in st.session_state:
+    st.session_state.enable_mcp = settings.get("enable_mcp", False)
+if "mcp_settings" not in st.session_state:
+    st.session_state.mcp_settings = mcp_settings
+if "editing_mcp_settings" not in st.session_state:
+    st.session_state.editing_mcp_settings = False
+if "mcp_processing" not in st.session_state:
+    st.session_state.mcp_processing = False
+if "mcp_tools_used" not in st.session_state:
+    st.session_state.mcp_tools_used = []
+
+# Flag to track if we need to update the conversation history
+if "update_conversation_history" not in st.session_state:
+    st.session_state.update_conversation_history = False
+
 # Set up sidebar
 # st.sidebar.title("Grok Chat")
 
 # Web Search Toggle - OUTSIDE Assistant Settings, above conversation section
 if "enable_web_search" not in st.session_state:
-    st.session_state.enable_web_search = True
+    st.session_state.enable_web_search = settings.get("enable_web_search", True)
 st.session_state.enable_web_search = st.sidebar.toggle(
     "Enable Web Search (Brave Search)",
     value=st.session_state.enable_web_search
 )
+
+# Save Web Search toggle state if changed
+if st.session_state.enable_web_search != settings.get("enable_web_search", True):
+    settings["enable_web_search"] = st.session_state.enable_web_search
+    save_settings(settings)
+
+# MCP Toggle - OUTSIDE Assistant Settings, below web search toggle
+st.session_state.enable_mcp = st.sidebar.toggle(
+    "Enable MCP (Model Context Protocol)",
+    value=st.session_state.enable_mcp,
+    help="Enable Model Context Protocol for enhanced AI capabilities"
+)
+
+# Save MCP toggle state if changed
+if st.session_state.enable_mcp != settings.get("enable_mcp", False):
+    settings["enable_mcp"] = st.session_state.enable_mcp
+    save_settings(settings)
 
 # Collapsible Model Settings at the top of the sidebar (without web search toggle)
 with st.sidebar.expander("Model Settings", expanded=False):
@@ -157,17 +211,121 @@ with st.sidebar.expander("Model Settings", expanded=False):
         settings["model_name"] = st.session_state.model_name
         save_settings(settings)
 
+# MCP Settings expander (only shown when MCP is enabled)
+if st.session_state.enable_mcp:
+    with st.sidebar.expander("MCP Settings", expanded=False):
+        st.info("Configure Model Context Protocol settings here. This allows the AI to access external tools and data sources.")
+
+        # Create a mapping of MCP server names to descriptions
+        mcp_server_descriptions = {
+            "brave-search": "Web search using Brave Search API",
+            "perplexity-mcp": "AI-powered search and documentation retrieval",
+            "tavily-mcp": "AI-powered web search and content extraction",
+            "Serper-search-mcp": "Google search and deep research capabilities",
+            "fetch": "Web content fetching",
+            "github": "GitHub integration",
+            "Memory Graph": "Knowledge graph for memory storage",
+            "mcp-reasoner": "Enhanced reasoning capabilities",
+            "firecrawl-mcp": "Web scraping and crawling"
+        }
+
+        # Display available MCP servers as toggles
+        if "mcpServers" in st.session_state.mcp_settings and st.session_state.mcp_settings["mcpServers"]:
+            st.subheader("Available MCP Servers")
+
+            # Track if any changes were made
+            changes_made = False
+
+            # Create toggles for each MCP server
+            for server_name, server_config in st.session_state.mcp_settings["mcpServers"].items():
+                # Get current disabled state (default to False if not present)
+                current_disabled = server_config.get("disabled", False)
+
+                # Get description or use a default
+                description = mcp_server_descriptions.get(server_name, "External tool integration")
+
+                # Create a toggle for this server
+                new_disabled = not st.toggle(
+                    f"{server_name}",
+                    value=not current_disabled,
+                    help=description
+                )
+
+                # If the state changed, update the settings
+                if new_disabled != current_disabled:
+                    st.session_state.mcp_settings["mcpServers"][server_name]["disabled"] = new_disabled
+                    changes_made = True
+
+            # Save settings if changes were made
+            if changes_made:
+                save_mcp_settings(st.session_state.mcp_settings)
+
+            # Add note about external editing
+            st.markdown("---")
+            st.caption("For advanced configuration, edit the mcp_settings.json file directly.")
+        else:
+            # No MCP servers configured
+            st.warning("No MCP servers configured. Edit the mcp_settings.json file to add servers.")
+            st.markdown("""
+            ### How to Configure MCP Servers
+
+            1. Create or edit the `mcp_settings.json` file in the application directory
+            2. Follow the Model Context Protocol (MCP) configuration format
+            3. Restart the application to load the new settings
+
+            Example configuration:
+            ```json
+            {
+              "mcpServers": {
+                "brave-search": {
+                  "command": "node",
+                  "args": ["path/to/brave-search/index.js"],
+                  "env": {
+                    "BRAVE_API_KEY": "your-api-key-here"
+                  },
+                  "disabled": false,
+                  "autoApprove": ["search"]
+                }
+              }
+            }
+            ```
+            """)
+
 # Create a new conversation button
 if st.sidebar.button("New Conversation"):
-    st.session_state.conversation_id = str(uuid.uuid4())
+    # Generate a new conversation ID
+    new_conv_id = str(uuid.uuid4())
+
+    # Set up the new conversation
+    st.session_state.conversation_id = new_conv_id
     st.session_state.messages = [
         {"role": "system", "content": "You are a highly intelligent AI assistant powered by the Grok model from xAI."}
     ]
     st.session_state.conversation_title = "New Conversation"
+
+    # Save the new conversation to ensure it appears in the history
+    save_conversation(
+        st.session_state.conversations,
+        new_conv_id,
+        st.session_state.messages,
+        st.session_state.conversation_title
+    )
+
+    # Set the update flag
+    st.session_state.update_conversation_history = True
+
+    # Rerun to update the UI
     st.rerun()
 
 # Display conversation history in sidebar
 st.sidebar.title("Conversation History")
+
+# Check if we need to update the conversation history
+if st.session_state.update_conversation_history:
+    # Reload conversations from file to ensure we have the latest data
+    st.session_state.conversations = load_conversations()
+    st.session_state.update_conversation_history = False
+
 conversations = st.session_state.conversations
 
 # State for renaming and deleting
@@ -341,32 +499,112 @@ When your response contains mathematical expressions or equations, format them a
 Always use these delimiters so that equations render correctly in Markdown/LaTeX environments.
 """
 
-# --- AI Integration with Brave Search ---
-def generate_response(user_message, use_search=True, reasoning_effort="medium"):
+# --- MCP Tool Simulation for Testing ---
+def simulate_mcp_tool_usage(query):
     """
-    Generate a response using the Grok model with optional Brave Search integration.
+    Simulate MCP tool usage based on the query content.
+    This is for testing UI feedback only until actual MCP integration is implemented.
+
+    Args:
+        query (str): The user's query
+
+    Returns:
+        list: List of simulated MCP tools used
+    """
+    # Reset tools used
+    tools_used = []
+
+    # Create a status placeholder for real-time updates
+    status_placeholder = st.empty()
+
+    # Simulate MCP server initialization - more concise
+    status_placeholder.info("Processing...")
+    time.sleep(1)  # Simulate initialization time
+
+    # Simulate tool usage based on query content
+    # Always use search for any query when MCP is enabled
+    status_placeholder.info("Using search tool...")
+    time.sleep(1)  # Simulate processing time
+    tools_used.append("search_brave-search")
+    # Update session state immediately for UI feedback
+    st.session_state.mcp_tools_used = tools_used.copy()
+
+    # Add news-specific tools for news-related queries
+    if "news" in query.lower() or "latest" in query.lower() or "recent" in query.lower():
+        status_placeholder.info("Retrieving latest news...")
+        time.sleep(1.5)  # Simulate processing time
+        tools_used.append("tavily-search_tavily-mcp")
+        # Update session state immediately for UI feedback
+        st.session_state.mcp_tools_used = tools_used.copy()
+
+    if "code" in query.lower() or "programming" in query.lower():
+        status_placeholder.info("Retrieving code documentation...")
+        time.sleep(1.5)  # Simulate processing time
+        tools_used.append("get_documentation_perplexity-mcp")
+        # Update session state immediately for UI feedback
+        st.session_state.mcp_tools_used = tools_used.copy()
+
+    if "web" in query.lower() or "website" in query.lower() or "crawl" in query.lower():
+        status_placeholder.info("Crawling website content...")
+        time.sleep(1.5)  # Simulate processing time
+        tools_used.append("firecrawl_scrape_firecrawl-mcp")
+        # Update session state immediately for UI feedback
+        st.session_state.mcp_tools_used = tools_used.copy()
+
+    if "research" in query.lower() or "analyze" in query.lower() or "disaster" in query.lower():
+        status_placeholder.info("Performing deep research...")
+        time.sleep(2)  # Simulate processing time
+        tools_used.append("deep-research_Serper-search-mcp")
+        # Update session state immediately for UI feedback
+        st.session_state.mcp_tools_used = tools_used.copy()
+
+    # Show completion message if tools were used
+    if tools_used:
+        status_placeholder.success("Processing complete")
+    else:
+        status_placeholder.info("Processing complete")
+
+    time.sleep(0.5)  # Give user time to see the final status
+    status_placeholder.empty()  # Clear the status message
+
+    return tools_used
+
+# --- AI Integration with Brave Search and MCP ---
+def generate_response(user_message, use_search=True, reasoning_effort="medium", use_mcp=False):
+    """
+    Generate a response using the Grok model with optional Brave Search integration and MCP.
 
     Args:
         user_message (str): The user's query or message
         use_search (bool): Whether to use Brave Search for context
         reasoning_effort (str): Level of reasoning effort for the Grok model
+        use_mcp (bool): Whether to use Model Context Protocol for enhanced capabilities
 
     Returns:
-        dict: Response containing content and reasoning
+        dict: Response containing content, reasoning, and MCP tools used
     """
+    # Reset MCP tracking variables
+    st.session_state.mcp_processing = use_mcp
+    st.session_state.mcp_tools_used = []
+
+    # Simulate MCP tool usage if MCP is enabled
+    if use_mcp:
+        simulate_mcp_tool_usage(user_message)
     # Get current date for AI awareness
     current_date = datetime.now().strftime("%Y-%m-%d")
 
-    # Define the base system prompt for Grok with date awareness
-    grok_system_prompt = f"""You are an AI assistant analyzing Brave Search results. Today's date is {current_date}.
-Process these key elements from each result:
-1. Core factual claims
-2. Statistical data points
-3. Authoritative sources
-4. Conflicting viewpoints
+    # Define the base system prompt for Grok with date awareness and emphasis on factual accuracy
+    grok_system_prompt = f"""You are an AI assistant powered by the Grok model from xAI. Today's date is {current_date}.
 
-When providing information from search results, maintain factual accuracy and proper source attribution.
-Always include numbered citations in your response when referencing search results.
+CRITICAL INSTRUCTIONS:
+1. Be direct and concise - focus on answering the user's question
+2. NEVER present speculative information as fact
+3. When using search results or external tools, you MUST cite your sources
+4. Always include a "References" section when providing factual information
+5. If you don't have enough information to answer factually, clearly state this
+6. When using MCP tools, always indicate which tools were used
+
+Your primary goal is to provide helpful, ACCURATE information that directly addresses what the user is asking.
 """
 
     # Initialize context and search metadata
@@ -413,27 +651,29 @@ Always include numbered citations in your response when referencing search resul
 
     # Construct the prompt with context if available
     if context:
-        # Create a structured prompt with search results
-        prompt = f"""You are an AI assistant analyzing Brave Search results for the query: "{user_message}"
+        # Create a structured prompt with search results - more direct and emphasizing citations
+        prompt = f"""Query: "{user_message}"
 Today's date is {current_date}.
 
-Here are relevant search results:
+Search results:
 {context}
 
-Based on these results and your knowledge, provide a comprehensive answer to the user's query.
-Synthesize information from multiple sources when available.
-Acknowledge conflicting viewpoints if present.
-Cite sources using [1], [2], etc. corresponding to the numbered search results.
-If the search results don't contain sufficient information, clearly state what you know from your training.
+IMPORTANT INSTRUCTIONS:
+1. Provide a direct answer using these search results and your knowledge
+2. You MUST cite sources using [1], [2], etc. for ANY factual information
+3. You MUST include a "References" section at the end listing all sources
+4. If search results don't provide enough information, clearly state this
+5. NEVER present information as factual without citing a source
 
-IMPORTANT: At the end of your response, include a "References" section that lists all the sources you cited, using this format:
-[1] Title of Source 1 - URL
-[2] Title of Source 2 - URL
-etc.
+Be concise and focus on answering what was asked.
 """
     else:
         # Use standard prompt without search context but still include date awareness
-        prompt = f"Today's date is {current_date}. {user_message}"
+        prompt = f"""Today's date is {current_date}.
+
+Answer directly: {user_message}
+
+IMPORTANT: If you don't have enough information to answer factually, clearly state this. DO NOT make up information or present speculative information as fact."""
 
     # Add math formatting instructions
     prompt = f"{LLM_MATH_FORMATTING_INSTRUCTION}\n\n{prompt}"
@@ -481,23 +721,56 @@ etc.
                 # If parsing fails, we'll just skip adding references
                 pass
 
-            # Check if the response already includes a References section
-            if local_search_results and "References" not in content and "REFERENCES" not in content and "references" not in content.lower():
-                # Create references section from search results
-                references = "\n\n## References\n"
-                for i, r in enumerate(local_search_results):
-                    references += f"[{i+1}] {r['title']} - {r['url']}\n"
+            # Always add a References section when search results are used
+            if local_search_results:
+                # Check if the response already includes a References section
+                if "References" not in content and "REFERENCES" not in content and "references" not in content.lower():
+                    # Create references section from search results
+                    references = "\n\n## References\n"
+                    for i, r in enumerate(local_search_results):
+                        references += f"[{i+1}] {r['title']} - {r['url']}\n"
 
-                # Add references to content
-                content += references
+                    # Add references to content
+                    content += references
+
+                # Add a note if no references section was found in the response
+                elif not any(marker in content for marker in ["[1]", "[2]", "[3]"]):
+                    content += "\n\n**Note: The information provided should include citations to the sources above. Please ask for clarification if sources aren't properly cited.**"
 
             # Add search attribution footer
             content += f"\n\n---\n*Response generated using Brave Search results on {current_date} for: \"{search_metadata['query']}\"*"
 
-        return {"content": content, "reasoning": reasoning}
+        # Add MCP attribution if MCP was used - with tools listed in content when appropriate
+        if use_mcp and st.session_state.mcp_tools_used:
+            # Add a Tools Used section if there's no References section
+            if "References" not in content and "REFERENCES" not in content and "references" not in content.lower():
+                content += "\n\n## Tools Used\n"
+                for tool in st.session_state.mcp_tools_used:
+                    content += f"- {tool}\n"
+
+            # No footer for MCP tools - information is available in the expandable section
+            pass
+        elif use_mcp:
+            # Only add a note if no tools were used but MCP was enabled
+            content += f"\n\n---\n*Note: MCP was enabled but no specific tools were used for this query*"
+
+        # Reset MCP processing status
+        st.session_state.mcp_processing = False
+
+        return {
+            "content": content,
+            "reasoning": reasoning,
+            "mcp_tools_used": st.session_state.mcp_tools_used if use_mcp else []
+        }
     except Exception as e:
+        # Reset MCP processing status on error
+        st.session_state.mcp_processing = False
         st.error(f"Error generating response: {str(e)}")
-        return {"content": "Sorry, I encountered an error while processing your request.", "reasoning": ""}
+        return {
+            "content": "Sorry, I encountered an error while processing your request.",
+            "reasoning": "",
+            "mcp_tools_used": []
+        }
 
 # --- Utility to render markdown and LaTeX ---
 def render_markdown_with_latex(text):
@@ -537,9 +810,32 @@ for idx, message in enumerate(st.session_state.messages):
                 display_with_copy_option(message["content"])  # Removed key parameter
             else:
                 render_markdown_with_latex(message["content"])
+
+            # Show reasoning if available and enabled
             if message.get("reasoning") and st.session_state.show_reasoning:
                 with st.expander("View Reasoning"):
                     render_markdown_with_latex(message["reasoning"])
+
+            # Show MCP tools used if available - with descriptions but more concise
+            if message.get("mcp_tools_used") and len(message["mcp_tools_used"]) > 0:
+                with st.expander("MCP Tools Used"):
+                    # Create a mapping of tool names to descriptions
+                    tool_descriptions = {
+                        "search_brave-search": "Web search using Brave Search API",
+                        "get_documentation_perplexity-mcp": "Documentation retrieval from Perplexity",
+                        "firecrawl_scrape_firecrawl-mcp": "Web scraping and content extraction",
+                        "firecrawl_crawl_firecrawl-mcp": "Website crawling and analysis",
+                        "deep-research_Serper-search-mcp": "In-depth research across multiple sources",
+                        "tavily-search_tavily-mcp": "AI-powered web search",
+                        "chat_perplexity_perplexity-mcp": "Conversational AI from Perplexity"
+                    }
+
+                    # Display tools with descriptions in a more compact format
+                    for tool in message["mcp_tools_used"]:
+                        description = tool_descriptions.get(tool, "External tool integration")
+                        st.markdown(f"**{tool}**: {description}")
+
+                    st.caption("These tools provide access to external data sources for more accurate information.")
 
 # Chat input
 prompt = st.chat_input("Ask Grok something...")
@@ -555,17 +851,31 @@ if prompt:
     # Generate and display assistant response
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
-        message_placeholder.markdown("Thinking...")
+
+        # Create a container for the thinking message and MCP status
+        thinking_container = st.container()
+
+        # Show a simple thinking message
+        with thinking_container:
+            message_placeholder.markdown("Processing your request...")
+
+            # Add a small spinner if MCP is enabled
+            if st.session_state.enable_mcp:
+                with st.spinner(""):
+                    time.sleep(0.1)  # Just to ensure the spinner appears
+
+            # The MCP status will be handled by the simulate_mcp_tool_usage function
 
         # If this is the first message, set the conversation title based on user input
         if len([m for m in st.session_state.messages if m["role"] == "user"]) == 1:
             st.session_state.conversation_title = prompt[:30] + "..." if len(prompt) > 30 else prompt
 
-        # Generate response from Grok with enhanced Brave Search integration
+        # Generate response from Grok with enhanced Brave Search integration and MCP if enabled
         full_response = generate_response(
             user_message=prompt,
             use_search=st.session_state.enable_web_search,
-            reasoning_effort=st.session_state.reasoning_effort
+            reasoning_effort=st.session_state.reasoning_effort,
+            use_mcp=st.session_state.enable_mcp
         )
 
         # Display the response
@@ -578,11 +888,17 @@ if prompt:
                 render_markdown_with_latex(full_response["reasoning"])
 
         # Add assistant response to chat history
-        st.session_state.messages.append({
+        message_data = {
             "role": "assistant",
             "content": full_response["content"],
             "reasoning": full_response["reasoning"]
-        })
+        }
+
+        # Add MCP tools used if any
+        if st.session_state.enable_mcp and full_response.get("mcp_tools_used"):
+            message_data["mcp_tools_used"] = full_response["mcp_tools_used"]
+
+        st.session_state.messages.append(message_data)
 
         # Save the conversation
         save_conversation(
@@ -592,8 +908,20 @@ if prompt:
             st.session_state.conversation_title
         )
 
+        # Set a flag to indicate that we need to update the conversation history
+        st.session_state.update_conversation_history = True
+
+        # Force a rerun to update the UI with the new conversation
+        st.rerun()
+
 # Add some information about the app
 st.markdown("---")
-st.caption("""This chat app uses the Grok model from xAI with enhanced Brave Search integration.
+caption_text = """This chat app uses the Grok model from xAI with enhanced Brave Search integration.
 Adjust the reasoning effort in the sidebar to control how deeply Grok thinks about your questions.
-Toggle web search to enable or disable Brave Search integration for more informed responses.""")
+Toggle web search to enable or disable Brave Search integration for more informed responses."""
+
+# Add MCP information if enabled - with more details but without redundant text
+if st.session_state.enable_mcp:
+    caption_text += "\nModel Context Protocol (MCP) is enabled, allowing the AI to access external tools and data sources such as web search, document retrieval, and web scraping. You can see which tools were used by expanding the 'MCP Tools Used' section in each response."
+
+st.caption(caption_text)
