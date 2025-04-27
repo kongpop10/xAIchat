@@ -6,7 +6,7 @@ A Streamlit-based chat application that provides a user-friendly interface for i
 
 - **Interactive Chat Interface**: Clean and intuitive UI for conversing with Grok models
 - **Conversation Management**: Save, rename, and delete conversations
-- **Web Search Integration**: Optional Brave Search integration to provide context for responses
+- **Enhanced Web Search Integration**: Advanced Brave Search integration with intelligent query processing, result clustering, and source attribution
 - **Customizable Settings**:
   - Adjustable reasoning effort (Low, Medium, High)
   - Option to view the model's reasoning process

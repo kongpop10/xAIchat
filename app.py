@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 import requests
 from functools import lru_cache
+from icon import get_xai_icon_html
 
 SETTINGS_FILE = "settings.json"
 
@@ -73,8 +74,14 @@ def fetch_xai_models():
 
 settings = load_settings()
 
-# Initialize the Streamlit app
-st.set_page_config(page_title="Grok Chat", layout="wide")
+# Initialize the Streamlit app with the xAI icon
+xai_icon = get_xai_icon_html()
+st.set_page_config(
+    page_title="Grok Chat",
+    page_icon=xai_icon,  # xAI logo as icon
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # Initialize session state variables
 if "conversation_id" not in st.session_state:
@@ -241,25 +248,80 @@ for conv_id, conv_data in sorted_conversations:
                 st.session_state.deleting_conversation_id = None
 
 # --- Brave Search Integration ---
-def brave_search(query, count=3):
-    """Call Brave Search API and return top web results as a list of dicts."""
+def brave_search(query, count=10, country="us", freshness=None, max_retries=3):
+    """
+    Enhanced Brave Search API integration with advanced parameters and error handling.
+
+    Args:
+        query (str): The search query
+        count (int): Number of results to return (1-50)
+        country (str): Country code for localized results (e.g., "us", "gb")
+        freshness (str, optional): Filter for result freshness (e.g., "d" for day, "w" for week)
+        max_retries (int): Maximum number of retry attempts for API calls
+
+    Returns:
+        list: Processed search results with title, URL, snippet, and content
+    """
     api_key = os.getenv('BRAVE_API_KEY')
     if not api_key:
-        raise ValueError("Brave Search API key not set. Please set BRAVE_API_KEY in your environment.")
+        st.warning("Brave Search API key not set. Please set BRAVE_API_KEY in your environment.")
+        return []
+
     url = "https://api.search.brave.com/res/v1/web/search"
-    headers = {"Accept": "application/json", "X-Subscription-Token": api_key}
-    params = {"q": query, "count": count}
-    resp = requests.get(url, headers=headers, params=params)
-    resp.raise_for_status()
-    data = resp.json()
-    results = []
-    for item in data.get('web', {}).get('results', []):
-        results.append({
-            'title': item.get('title'),
-            'url': item.get('url'),
-            'snippet': item.get('description') or item.get('snippet', '')
-        })
-    return results
+    headers = {
+        "Accept": "application/json",
+        "X-Subscription-Token": api_key
+    }
+
+    # Build request parameters with advanced options
+    params = {
+        "q": query,
+        "count": min(count, 50),  # Ensure count is within API limits
+        "country": country
+    }
+
+    # Add optional parameters if provided
+    if freshness:
+        params["freshness"] = freshness
+
+    # Implement retry logic with exponential backoff
+    retry_delay = 1
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+
+            # Process and extract key elements from the response
+            results = []
+            for item in data.get('web', {}).get('results', []):
+                result = {
+                    'title': item.get('title', ''),
+                    'url': item.get('url', ''),
+                    'snippet': item.get('description') or item.get('snippet', ''),
+                    'content': item.get('page', {}).get('content', ''),
+                    'published_date': item.get('published_date', '')
+                }
+                results.append(result)
+
+            # Extract any cluster topics if available for better context organization
+            clusters = data.get('web', {}).get('cluster_topics', [])
+            if clusters:
+                for i, result in enumerate(results):
+                    if i < len(clusters):
+                        result['cluster'] = clusters[i].get('title', '')
+
+            return results
+
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                st.warning(f"Error fetching search results: {str(e)}")
+                return []
+
+    return []
 
 # --- LLM System Prompt Addition: Math Formatting Instruction ---
 LLM_MATH_FORMATTING_INSTRUCTION = """
@@ -279,34 +341,159 @@ When your response contains mathematical expressions or equations, format them a
 Always use these delimiters so that equations render correctly in Markdown/LaTeX environments.
 """
 
-# --- Modify generate_response to use Brave Search ---
-def generate_response(user_message, use_search=True, *args, **kwargs):
+# --- AI Integration with Brave Search ---
+def generate_response(user_message, use_search=True, reasoning_effort="medium"):
+    """
+    Generate a response using the Grok model with optional Brave Search integration.
+
+    Args:
+        user_message (str): The user's query or message
+        use_search (bool): Whether to use Brave Search for context
+        reasoning_effort (str): Level of reasoning effort for the Grok model
+
+    Returns:
+        dict: Response containing content and reasoning
+    """
+    # Get current date for AI awareness
+    current_date = datetime.now().strftime("%Y-%m-%d")
+
+    # Define the base system prompt for Grok with date awareness
+    grok_system_prompt = f"""You are an AI assistant analyzing Brave Search results. Today's date is {current_date}.
+Process these key elements from each result:
+1. Core factual claims
+2. Statistical data points
+3. Authoritative sources
+4. Conflicting viewpoints
+
+When providing information from search results, maintain factual accuracy and proper source attribution.
+Always include numbered citations in your response when referencing search results.
+"""
+
+    # Initialize context and search metadata
     context = ""
+    search_metadata = {}
+
+    # Fetch search results if enabled
     if use_search:
-        search_results = brave_search(user_message)
-        if search_results:
-            context = "\n".join([
-                f"[{i+1}] {r['title']}: {r['snippet']} (Source: {r['url']})" for i, r in enumerate(search_results)
-            ])
-    prompt = user_message
+        try:
+            # Determine optimal search parameters based on query complexity
+            query_length = len(user_message.split())
+            result_count = min(10, max(5, query_length // 3))  # Scale results with query complexity
+
+            # Get freshness parameter based on query content
+            time_sensitive_keywords = ["news", "recent", "latest", "today", "current"]
+            freshness = "d" if any(keyword in user_message.lower() for keyword in time_sensitive_keywords) else None
+
+            # Perform the search with enhanced parameters
+            search_results = brave_search(
+                query=user_message,
+                count=result_count,
+                freshness=freshness
+            )
+
+            if search_results:
+                # Format search results for context
+                formatted_results = []
+                for i, r in enumerate(search_results):
+                    result_text = f"[{i+1}] {r['title']}: {r['snippet']}"
+                    if r.get('published_date'):
+                        result_text += f" (Published: {r['published_date']})"
+                    result_text += f" (Source: {r['url']})"
+                    formatted_results.append(result_text)
+
+                context = "\n".join(formatted_results)
+
+                # Add search metadata for better context
+                search_metadata = {
+                    "result_count": len(search_results),
+                    "query": user_message
+                }
+        except Exception as e:
+            st.warning(f"Search error: {str(e)}. Proceeding without search results.")
+
+    # Construct the prompt with context if available
     if context:
-        prompt = f"You are an expert assistant. Here are some relevant web results for the user's question.\n{context}\n\nNow answer the user's question using the above information as needed. Question: {user_message}"
+        # Create a structured prompt with search results
+        prompt = f"""You are an AI assistant analyzing Brave Search results for the query: "{user_message}"
+Today's date is {current_date}.
+
+Here are relevant search results:
+{context}
+
+Based on these results and your knowledge, provide a comprehensive answer to the user's query.
+Synthesize information from multiple sources when available.
+Acknowledge conflicting viewpoints if present.
+Cite sources using [1], [2], etc. corresponding to the numbered search results.
+If the search results don't contain sufficient information, clearly state what you know from your training.
+
+IMPORTANT: At the end of your response, include a "References" section that lists all the sources you cited, using this format:
+[1] Title of Source 1 - URL
+[2] Title of Source 2 - URL
+etc.
+"""
+    else:
+        # Use standard prompt without search context but still include date awareness
+        prompt = f"Today's date is {current_date}. {user_message}"
+
+    # Add math formatting instructions
     prompt = f"{LLM_MATH_FORMATTING_INSTRUCTION}\n\n{prompt}"
+
     try:
         # Initialize the OpenAI client with xAI's base URL
         client = OpenAI(
             api_key=os.getenv("XAI_API_KEY"),
             base_url="https://api.x.ai/v1"
         )
-        # Call the Grok model
+
+        # Prepare messages for the API call
+        messages = [
+            {"role": "system", "content": grok_system_prompt},
+            {"role": "user", "content": prompt}
+        ]
+
+        # Call the Grok model with optimized parameters
         completion = client.chat.completions.create(
             model=st.session_state.get("model_name", "grok-3-mini-beta"),
-            reasoning_effort=kwargs.get("reasoning_effort", "medium"),
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
+            reasoning_effort=reasoning_effort,
+            messages=messages,
+            temperature=0.3,  # Lower temperature for more factual responses when using search
         )
+
+        # Extract content and reasoning
         content = completion.choices[0].message.content
         reasoning = getattr(completion.choices[0].message, "reasoning_content", "")
+
+        # Process the response to ensure references are properly formatted
+        if context and search_metadata and 'result_count' in search_metadata:
+            # Store search results in a local variable to avoid potential scope issues
+            local_search_results = []
+            try:
+                # Format search results from the context
+                context_lines = context.split('\n')
+                for line in context_lines:
+                    if line.startswith('[') and '] ' in line and ' (Source: ' in line:
+                        parts = line.split(' (Source: ')
+                        if len(parts) == 2:
+                            url_part = parts[1].rstrip(')')
+                            title_part = parts[0].split('] ', 1)[1] if '] ' in parts[0] else parts[0]
+                            local_search_results.append({'title': title_part, 'url': url_part})
+            except Exception:
+                # If parsing fails, we'll just skip adding references
+                pass
+
+            # Check if the response already includes a References section
+            if local_search_results and "References" not in content and "REFERENCES" not in content and "references" not in content.lower():
+                # Create references section from search results
+                references = "\n\n## References\n"
+                for i, r in enumerate(local_search_results):
+                    references += f"[{i+1}] {r['title']} - {r['url']}\n"
+
+                # Add references to content
+                content += references
+
+            # Add search attribution footer
+            content += f"\n\n---\n*Response generated using Brave Search results on {current_date} for: \"{search_metadata['query']}\"*"
+
         return {"content": content, "reasoning": reasoning}
     except Exception as e:
         st.error(f"Error generating response: {str(e)}")
@@ -321,19 +508,20 @@ def render_markdown_with_latex(text):
     st.markdown(text, unsafe_allow_html=False)
 
 # --- Utility function to display content with a copy option ---
-def display_with_copy_option(text, key=None):
+def display_with_copy_option(text, _=None):  # Changed key to _ to indicate unused parameter
     """
     Display content with a copy option using Streamlit's built-in components.
 
     Args:
         text: The text to display and make available for copying
-        key: A unique key for the component
+        _: Unused parameter (kept for backward compatibility)
     """
     # Display the text normally first
     st.markdown(text, unsafe_allow_html=False)
 
-    # Add an expander for copying the text
+    # Add an expander for copying the text (without key parameter)
     with st.expander("Copy this response"):
+        # Don't use key parameter at all since it's not supported
         st.code(text, language=None)  # Code block has built-in copy button
 
 # Main chat interface
@@ -346,7 +534,7 @@ for idx, message in enumerate(st.session_state.messages):
         with st.chat_message(message["role"]):
             # Render message content with copy option for assistant
             if message["role"] == "assistant":
-                display_with_copy_option(message["content"], key=f"msg_{idx}")
+                display_with_copy_option(message["content"])  # Removed key parameter
             else:
                 render_markdown_with_latex(message["content"])
             if message.get("reasoning") and st.session_state.show_reasoning:
@@ -373,9 +561,9 @@ if prompt:
         if len([m for m in st.session_state.messages if m["role"] == "user"]) == 1:
             st.session_state.conversation_title = prompt[:30] + "..." if len(prompt) > 30 else prompt
 
-        # Generate response from Grok
+        # Generate response from Grok with enhanced Brave Search integration
         full_response = generate_response(
-            prompt,
+            user_message=prompt,
             use_search=st.session_state.enable_web_search,
             reasoning_effort=st.session_state.reasoning_effort
         )
@@ -406,4 +594,6 @@ if prompt:
 
 # Add some information about the app
 st.markdown("---")
-st.caption("This chat app uses the Grok model from xAI. Adjust the reasoning effort in the sidebar to control how deeply Grok thinks about your questions.")
+st.caption("""This chat app uses the Grok model from xAI with enhanced Brave Search integration.
+Adjust the reasoning effort in the sidebar to control how deeply Grok thinks about your questions.
+Toggle web search to enable or disable Brave Search integration for more informed responses.""")
