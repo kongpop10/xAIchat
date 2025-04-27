@@ -1,18 +1,27 @@
 # 🚀 Grok Chat Interface
 
-A Streamlit-based chat application that provides a user-friendly interface for interacting with xAI's Grok models.
+A Streamlit-based chat application that provides a user-friendly interface for interacting with xAI's Grok models, featuring web search integration and Model Context Protocol (MCP) support.
 
 ## 💡 Features
 
 - 💬 **Interactive Chat Interface**: Clean and intuitive UI for conversing with Grok models
 - 📚 **Conversation Management**: Save, rename, and delete conversations
-- 🌐 **Enhanced Web Search Integration**: Advanced Brave Search integration with intelligent query processing, result clustering, and source attribution
+- 🌐 **Enhanced Web Search Integration**:
+  - Advanced Brave Search integration with intelligent query processing
+  - Automatic result clustering and source attribution
+  - Freshness filtering for time-sensitive queries
+  - References section with citations in responses
 - ⚙️ **Customizable Settings**:
   - Adjustable reasoning effort (Low, Medium, High)
   - Option to view the model's reasoning process
-  - Automatic model selection from available xAI models via dropdown
+  - Dynamic model selection from available xAI models via API
+- 🔌 **Model Context Protocol (MCP) Support**:
+  - Configure and use MCP to enhance AI capabilities with external tools
+  - Transparent tool usage indicators in responses
+  - Support for multiple MCP servers including Brave Search, Perplexity, Tavily, and more
 - ➗ **LaTeX Support**: Proper rendering of mathematical expressions and equations
 - 📋 **Copy Functionality**: Easy copying of assistant responses via expandable sections
+- 🎨 **Official xAI Branding**: Uses the official xAI icon from x.ai/api
 
 ## 🔧 Installation
 
@@ -53,9 +62,31 @@ If you encounter any errors when running the application:
 
 2. Verify that your environment variables are set correctly.
 
+3. Check that your xAI API key has access to the models you're trying to use.
+
 ## ⚙️ Configuration
 
 The application stores settings in `settings.json` and conversations in `conversations.json`. These files are automatically created and managed by the application.
+
+### MCP Configuration
+
+The application supports Model Context Protocol (MCP) for enhanced AI capabilities:
+
+1. Enable MCP using the toggle in the sidebar
+2. Configure MCP settings by clicking on the "MCP Settings" expander
+3. Edit the JSON configuration to match your MCP server setup
+4. Save the configuration to apply changes
+
+The MCP settings are stored in `mcp_settings.json` in the same format as Claude's MCP configuration. For security reasons, this file is excluded from version control as it may contain API keys.
+
+### Web Search Integration
+
+The application integrates with Brave Search to provide more informed responses:
+
+1. Enable Web Search using the toggle in the sidebar
+2. The AI will automatically determine when to use search based on your query
+3. Search results are processed and incorporated into the response
+4. A references section is added to responses with citations to the sources used
 
 ## ✅ Requirements
 
@@ -79,7 +110,8 @@ MIT
 
 ## 👏 Acknowledgements
 
-- xAI for providing the Grok models
+- xAI for providing the Grok models and API
 - Brave Search for web search capabilities
 - Streamlit for the web application framework
+- Model Context Protocol (MCP) for enhanced AI capabilities
 - Augment for AI code assistance
