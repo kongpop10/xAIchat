@@ -30,17 +30,40 @@ def save_settings(settings):
 
 def load_mcp_settings():
     """Load MCP settings from the MCP settings file."""
+    # First try to load from @mcp_settings.json (user's private file)
+    if os.path.exists("@" + MCP_SETTINGS_FILE):
+        try:
+            with open("@" + MCP_SETTINGS_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            st.warning(f"Error loading @{MCP_SETTINGS_FILE}: {str(e)}")
+            # Fall back to regular mcp_settings.json
+
+    # If @mcp_settings.json doesn't exist or had an error, try regular mcp_settings.json
     if os.path.exists(MCP_SETTINGS_FILE):
         try:
             with open(MCP_SETTINGS_FILE, "r") as f:
                 return json.load(f)
         except Exception as e:
-            st.warning(f"Error loading MCP settings: {str(e)}")
+            st.warning(f"Error loading {MCP_SETTINGS_FILE}: {str(e)}")
             return {}
+
+    # If no settings file exists, return empty settings
     return {}
 
 def save_mcp_settings(mcp_settings):
     """Save MCP settings to the MCP settings file."""
+    # First try to save to @mcp_settings.json if it exists
+    if os.path.exists("@" + MCP_SETTINGS_FILE):
+        try:
+            with open("@" + MCP_SETTINGS_FILE, "w") as f:
+                json.dump(mcp_settings, f, indent=2)
+            return
+        except Exception as e:
+            st.warning(f"Error saving to @{MCP_SETTINGS_FILE}: {str(e)}")
+            # Fall back to regular mcp_settings.json
+
+    # If @mcp_settings.json doesn't exist or had an error, save to regular mcp_settings.json
     try:
         with open(MCP_SETTINGS_FILE, "w") as f:
             json.dump(mcp_settings, f, indent=2)
@@ -62,6 +85,94 @@ def save_conversation(conversations, conversation_id, messages, title):
     }
     with open("conversations.json", "w") as f:
         json.dump(conversations, f)
+
+def create_default_mcp_settings():
+    """
+    Create a default MCP settings file if none exists.
+
+    Returns:
+        dict: Default MCP settings
+    """
+    default_settings = {
+        "mcpServers": {
+            "brave-search": {
+                "command": "node",
+                "args": ["path/to/brave-search/index.js"],
+                "env": {
+                    "BRAVE_API_KEY": "your-api-key-here"
+                },
+                "disabled": False,
+                "autoApprove": ["search"]
+            }
+        }
+    }
+
+    # Save the default settings
+    try:
+        with open(MCP_SETTINGS_FILE, "w") as f:
+            json.dump(default_settings, f, indent=2)
+        st.success(f"Created default {MCP_SETTINGS_FILE} file. Please edit it to configure your MCP servers.")
+    except Exception as e:
+        st.warning(f"Error creating default MCP settings: {str(e)}")
+
+    return default_settings
+
+def get_mcp_tool_descriptions():
+    """
+    Extract tool descriptions from MCP settings.
+
+    Returns:
+        dict: Mapping of tool names to descriptions
+    """
+    # Default descriptions for common tools
+    default_descriptions = {
+        "search_brave-search": "Web search using Brave Search API",
+        "get_documentation_perplexity-mcp": "Documentation retrieval from Perplexity",
+        "firecrawl_scrape_firecrawl-mcp": "Web scraping and content extraction",
+        "firecrawl_crawl_firecrawl-mcp": "Website crawling and analysis",
+        "deep-research_Serper-search-mcp": "In-depth research across multiple sources",
+        "tavily-search_tavily-mcp": "AI-powered web search",
+        "chat_perplexity_perplexity-mcp": "Conversational AI from Perplexity"
+    }
+
+    # Get MCP settings
+    mcp_settings = st.session_state.mcp_settings
+
+    # Initialize tool descriptions dictionary
+    tool_descriptions = {}
+
+    # Extract tool information from MCP settings
+    if "mcpServers" in mcp_settings:
+        for server_name, server_config in mcp_settings["mcpServers"].items():
+            # Skip disabled servers
+            if server_config.get("disabled", False):
+                continue
+
+            # Get auto-approved functions
+            auto_approve = server_config.get("autoApprove", [])
+            always_allow = server_config.get("alwaysAllow", [])
+
+            # Combine all allowed functions
+            allowed_functions = set(auto_approve + always_allow)
+
+            # Add tool descriptions
+            for function in allowed_functions:
+                tool_name = f"{function}_{server_name}"
+
+                # Use default description if available, otherwise generate one
+                if tool_name in default_descriptions:
+                    tool_descriptions[tool_name] = default_descriptions[tool_name]
+                else:
+                    # Generate a description based on function and server names
+                    function_name = function.replace("_", " ")
+                    server_display = server_name.replace("-mcp", "").replace("-", " ")
+                    tool_descriptions[tool_name] = f"{function_name.capitalize()} via {server_display.capitalize()}"
+
+    # If no tools were found, use default descriptions
+    if not tool_descriptions:
+        tool_descriptions = default_descriptions
+
+    return tool_descriptions
 
 # --- xAI Models Integration ---
 @lru_cache(maxsize=1)
@@ -92,8 +203,14 @@ def fetch_xai_models():
         st.warning(f"Error fetching models: {str(e)}")
         return ["grok-3-mini-beta", "grok-3-mini-fast-beta"]  # Default models as fallback
 
+# Load settings
 settings = load_settings()
+
+# Load MCP settings or create default if none exist
 mcp_settings = load_mcp_settings()
+if not mcp_settings or "mcpServers" not in mcp_settings or not mcp_settings["mcpServers"]:
+    # Create default MCP settings if none exist
+    mcp_settings = create_default_mcp_settings()
 
 # Initialize the Streamlit app with the xAI favicon
 xai_favicon = get_xai_favicon()
@@ -216,7 +333,7 @@ if st.session_state.enable_mcp:
     with st.sidebar.expander("MCP Settings", expanded=False):
         st.info("Configure Model Context Protocol settings here. This allows the AI to access external tools and data sources.")
 
-        # Create a mapping of MCP server names to descriptions
+        # Create a mapping of server names to descriptions based on their capabilities
         mcp_server_descriptions = {
             "brave-search": "Web search using Brave Search API",
             "perplexity-mcp": "AI-powered search and documentation retrieval",
@@ -265,31 +382,47 @@ if st.session_state.enable_mcp:
             st.caption("For advanced configuration, edit the mcp_settings.json file directly.")
         else:
             # No MCP servers configured
-            st.warning("No MCP servers configured. Edit the mcp_settings.json file to add servers.")
-            st.markdown("""
-            ### How to Configure MCP Servers
+            st.warning("No active MCP servers found. Configure your MCP servers below.")
 
-            1. Create or edit the `mcp_settings.json` file in the application directory
-            2. Follow the Model Context Protocol (MCP) configuration format
-            3. Restart the application to load the new settings
+            # Check if we have a settings file
+            if os.path.exists(MCP_SETTINGS_FILE) or os.path.exists("@" + MCP_SETTINGS_FILE):
+                st.markdown("""
+                ### How to Configure MCP Servers
 
-            Example configuration:
-            ```json
-            {
-              "mcpServers": {
-                "brave-search": {
-                  "command": "node",
-                  "args": ["path/to/brave-search/index.js"],
-                  "env": {
-                    "BRAVE_API_KEY": "your-api-key-here"
-                  },
-                  "disabled": false,
-                  "autoApprove": ["search"]
+                1. Edit the `mcp_settings.json` or `@mcp_settings.json` file in the application directory
+                2. Make sure your MCP servers are properly configured with valid paths and API keys
+                3. Ensure at least one server is not disabled
+                4. Restart the application to load the new settings
+                """)
+            else:
+                st.markdown("""
+                ### How to Configure MCP Servers
+
+                A default `mcp_settings.json` file has been created for you. You need to:
+
+                1. Edit the `mcp_settings.json` file in the application directory
+                2. Configure your MCP servers with valid paths and API keys
+                3. Restart the application to load the new settings
+
+                Example configuration:
+                ```json
+                {
+                  "mcpServers": {
+                    "brave-search": {
+                      "command": "node",
+                      "args": ["path/to/brave-search/index.js"],
+                      "env": {
+                        "BRAVE_API_KEY": "your-api-key-here"
+                      },
+                      "disabled": false,
+                      "autoApprove": ["search"]
+                    }
+                  }
                 }
-              }
-            }
-            ```
-            """)
+                ```
+
+                For enhanced security, you can create a `@mcp_settings.json` file instead, which is excluded from version control.
+                """)
 
 # Create a new conversation button
 if st.sidebar.button("New Conversation"):
@@ -504,6 +637,7 @@ def simulate_mcp_tool_usage(query):
     """
     Simulate MCP tool usage based on the query content.
     This is for testing UI feedback only until actual MCP integration is implemented.
+    Uses available tools from mcp_settings.json.
 
     Args:
         query (str): The user's query
@@ -517,46 +651,90 @@ def simulate_mcp_tool_usage(query):
     # Create a status placeholder for real-time updates
     status_placeholder = st.empty()
 
-    # Simulate MCP server initialization - more concise
+    # Simulate MCP server initialization
     status_placeholder.info("Processing...")
     time.sleep(1)  # Simulate initialization time
 
-    # Simulate tool usage based on query content
-    # Always use search for any query when MCP is enabled
-    status_placeholder.info("Using search tool...")
-    time.sleep(1)  # Simulate processing time
-    tools_used.append("search_brave-search")
-    # Update session state immediately for UI feedback
-    st.session_state.mcp_tools_used = tools_used.copy()
+    # Get available MCP tools from settings
+    available_tools = []
+
+    # Extract available tools from MCP settings
+    if "mcpServers" in st.session_state.mcp_settings:
+        for server_name, server_config in st.session_state.mcp_settings["mcpServers"].items():
+            # Skip disabled servers
+            if server_config.get("disabled", False):
+                continue
+
+            # Get auto-approved functions and always allowed functions
+            auto_approve = server_config.get("autoApprove", [])
+            always_allow = server_config.get("alwaysAllow", [])
+
+            # Combine all allowed functions
+            allowed_functions = set(auto_approve + always_allow)
+
+            # Add tools to available tools list
+            for function in allowed_functions:
+                available_tools.append(f"{function}_{server_name}")
+
+    # If no tools are available, use default tools for simulation
+    if not available_tools:
+        available_tools = [
+            "search_brave-search",
+            "tavily-search_tavily-mcp",
+            "get_documentation_perplexity-mcp",
+            "firecrawl_scrape_firecrawl-mcp",
+            "deep-research_Serper-search-mcp"
+        ]
+
+    # Simulate tool usage based on query content and available tools
+    # Try to use search for any query if available
+    search_tools = [t for t in available_tools if "search" in t.lower()]
+    if search_tools:
+        status_placeholder.info(f"Using search tool...")
+        time.sleep(1)  # Simulate processing time
+        tools_used.append(search_tools[0])  # Use the first available search tool
+        # Update session state immediately for UI feedback
+        st.session_state.mcp_tools_used = tools_used.copy()
 
     # Add news-specific tools for news-related queries
-    if "news" in query.lower() or "latest" in query.lower() or "recent" in query.lower():
-        status_placeholder.info("Retrieving latest news...")
-        time.sleep(1.5)  # Simulate processing time
-        tools_used.append("tavily-search_tavily-mcp")
-        # Update session state immediately for UI feedback
-        st.session_state.mcp_tools_used = tools_used.copy()
+    if ("news" in query.lower() or "latest" in query.lower() or "recent" in query.lower()):
+        news_tools = [t for t in available_tools if "news" in t.lower() or "tavily" in t.lower()]
+        if news_tools and news_tools[0] not in tools_used:
+            status_placeholder.info("Retrieving latest news...")
+            time.sleep(1.5)  # Simulate processing time
+            tools_used.append(news_tools[0])
+            # Update session state immediately for UI feedback
+            st.session_state.mcp_tools_used = tools_used.copy()
 
+    # Add code-specific tools for code-related queries
     if "code" in query.lower() or "programming" in query.lower():
-        status_placeholder.info("Retrieving code documentation...")
-        time.sleep(1.5)  # Simulate processing time
-        tools_used.append("get_documentation_perplexity-mcp")
-        # Update session state immediately for UI feedback
-        st.session_state.mcp_tools_used = tools_used.copy()
+        code_tools = [t for t in available_tools if "documentation" in t.lower() or "perplexity" in t.lower()]
+        if code_tools and code_tools[0] not in tools_used:
+            status_placeholder.info("Retrieving code documentation...")
+            time.sleep(1.5)  # Simulate processing time
+            tools_used.append(code_tools[0])
+            # Update session state immediately for UI feedback
+            st.session_state.mcp_tools_used = tools_used.copy()
 
+    # Add web-specific tools for web-related queries
     if "web" in query.lower() or "website" in query.lower() or "crawl" in query.lower():
-        status_placeholder.info("Crawling website content...")
-        time.sleep(1.5)  # Simulate processing time
-        tools_used.append("firecrawl_scrape_firecrawl-mcp")
-        # Update session state immediately for UI feedback
-        st.session_state.mcp_tools_used = tools_used.copy()
+        web_tools = [t for t in available_tools if "scrape" in t.lower() or "crawl" in t.lower() or "firecrawl" in t.lower()]
+        if web_tools and web_tools[0] not in tools_used:
+            status_placeholder.info("Crawling website content...")
+            time.sleep(1.5)  # Simulate processing time
+            tools_used.append(web_tools[0])
+            # Update session state immediately for UI feedback
+            st.session_state.mcp_tools_used = tools_used.copy()
 
+    # Add research-specific tools for research-related queries
     if "research" in query.lower() or "analyze" in query.lower() or "disaster" in query.lower():
-        status_placeholder.info("Performing deep research...")
-        time.sleep(2)  # Simulate processing time
-        tools_used.append("deep-research_Serper-search-mcp")
-        # Update session state immediately for UI feedback
-        st.session_state.mcp_tools_used = tools_used.copy()
+        research_tools = [t for t in available_tools if "research" in t.lower() or "serper" in t.lower()]
+        if research_tools and research_tools[0] not in tools_used:
+            status_placeholder.info("Performing deep research...")
+            time.sleep(2)  # Simulate processing time
+            tools_used.append(research_tools[0])
+            # Update session state immediately for UI feedback
+            st.session_state.mcp_tools_used = tools_used.copy()
 
     # Show completion message if tools were used
     if tools_used:
@@ -819,16 +997,8 @@ for idx, message in enumerate(st.session_state.messages):
             # Show MCP tools used if available - with descriptions but more concise
             if message.get("mcp_tools_used") and len(message["mcp_tools_used"]) > 0:
                 with st.expander("MCP Tools Used"):
-                    # Create a mapping of tool names to descriptions
-                    tool_descriptions = {
-                        "search_brave-search": "Web search using Brave Search API",
-                        "get_documentation_perplexity-mcp": "Documentation retrieval from Perplexity",
-                        "firecrawl_scrape_firecrawl-mcp": "Web scraping and content extraction",
-                        "firecrawl_crawl_firecrawl-mcp": "Website crawling and analysis",
-                        "deep-research_Serper-search-mcp": "In-depth research across multiple sources",
-                        "tavily-search_tavily-mcp": "AI-powered web search",
-                        "chat_perplexity_perplexity-mcp": "Conversational AI from Perplexity"
-                    }
+                    # Get tool descriptions from MCP settings
+                    tool_descriptions = get_mcp_tool_descriptions()
 
                     # Display tools with descriptions in a more compact format
                     for tool in message["mcp_tools_used"]:
