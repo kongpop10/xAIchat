@@ -30,13 +30,15 @@ def save_settings(settings):
 
 def load_mcp_settings():
     """Load MCP settings from the MCP settings file."""
+    error_messages = []
+
     # First try to load from @mcp_settings.json (user's private file)
     if os.path.exists("@" + MCP_SETTINGS_FILE):
         try:
             with open("@" + MCP_SETTINGS_FILE, "r") as f:
                 return json.load(f)
         except Exception as e:
-            st.warning(f"Error loading @{MCP_SETTINGS_FILE}: {str(e)}")
+            error_messages.append(f"Error loading @{MCP_SETTINGS_FILE}: {str(e)}")
             # Fall back to regular mcp_settings.json
 
     # If @mcp_settings.json doesn't exist or had an error, try regular mcp_settings.json
@@ -45,7 +47,7 @@ def load_mcp_settings():
             with open(MCP_SETTINGS_FILE, "r") as f:
                 return json.load(f)
         except Exception as e:
-            st.warning(f"Error loading {MCP_SETTINGS_FILE}: {str(e)}")
+            error_messages.append(f"Error loading {MCP_SETTINGS_FILE}: {str(e)}")
             return {}
 
     # If no settings file exists, return empty settings
@@ -53,6 +55,8 @@ def load_mcp_settings():
 
 def save_mcp_settings(mcp_settings):
     """Save MCP settings to the MCP settings file."""
+    error_messages = []
+
     # First try to save to @mcp_settings.json if it exists
     if os.path.exists("@" + MCP_SETTINGS_FILE):
         try:
@@ -60,7 +64,7 @@ def save_mcp_settings(mcp_settings):
                 json.dump(mcp_settings, f, indent=2)
             return
         except Exception as e:
-            st.warning(f"Error saving to @{MCP_SETTINGS_FILE}: {str(e)}")
+            error_messages.append(f"Error saving to @{MCP_SETTINGS_FILE}: {str(e)}")
             # Fall back to regular mcp_settings.json
 
     # If @mcp_settings.json doesn't exist or had an error, save to regular mcp_settings.json
@@ -68,7 +72,7 @@ def save_mcp_settings(mcp_settings):
         with open(MCP_SETTINGS_FILE, "w") as f:
             json.dump(mcp_settings, f, indent=2)
     except Exception as e:
-        st.warning(f"Error saving MCP settings: {str(e)}")
+        error_messages.append(f"Error saving MCP settings: {str(e)}")
 
 def load_conversations():
     try:
@@ -111,9 +115,10 @@ def create_default_mcp_settings():
     try:
         with open(MCP_SETTINGS_FILE, "w") as f:
             json.dump(default_settings, f, indent=2)
-        st.success(f"Created default {MCP_SETTINGS_FILE} file. Please edit it to configure your MCP servers.")
+        # Success message will be shown after page config
     except Exception as e:
-        st.warning(f"Error creating default MCP settings: {str(e)}")
+        # Error message will be shown after page config
+        pass
 
     return default_settings
 
@@ -178,11 +183,12 @@ def get_mcp_tool_descriptions():
 @lru_cache(maxsize=1)
 def fetch_xai_models():
     """Fetch available models from xAI API and cache the results."""
+    error_message = None
     try:
         api_key = os.getenv("XAI_API_KEY")
         if not api_key:
-            st.warning("xAI API key not set. Please set XAI_API_KEY in your environment.")
-            return ["grok-3-mini-beta", "grok-3-mini-fast-beta"]  # Default models
+            error_message = "xAI API key not set. Please set XAI_API_KEY in your environment."
+            return ["grok-3-mini-beta", "grok-3-mini-fast-beta"], error_message  # Default models
 
         client = OpenAI(
             api_key=api_key,
@@ -198,21 +204,23 @@ def fetch_xai_models():
         # Sort models alphabetically
         models.sort()
 
-        return models
+        return models, None
     except Exception as e:
-        st.warning(f"Error fetching models: {str(e)}")
-        return ["grok-3-mini-beta", "grok-3-mini-fast-beta"]  # Default models as fallback
+        error_message = f"Error fetching models: {str(e)}"
+        return ["grok-3-mini-beta", "grok-3-mini-fast-beta"], error_message  # Default models as fallback
 
-# Load settings
+# Load settings without Streamlit commands
 settings = load_settings()
 
-# Load MCP settings or create default if none exist
+# Load MCP settings without Streamlit commands
 mcp_settings = load_mcp_settings()
+created_default_settings = False
 if not mcp_settings or "mcpServers" not in mcp_settings or not mcp_settings["mcpServers"]:
     # Create default MCP settings if none exist
     mcp_settings = create_default_mcp_settings()
+    created_default_settings = True
 
-# Initialize the Streamlit app with the xAI favicon
+# Initialize the Streamlit app with the xAI favicon - MUST BE FIRST STREAMLIT COMMAND
 xai_favicon = get_xai_favicon()
 st.set_page_config(
     page_title="Grok Chat",
@@ -220,6 +228,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Now we can show Streamlit messages after page config
+if created_default_settings:
+    st.success(f"Created default {MCP_SETTINGS_FILE} file. Please edit it to configure your MCP servers.")
 
 # Initialize session state variables
 if "conversation_id" not in st.session_state:
@@ -309,7 +321,9 @@ with st.sidebar.expander("Model Settings", expanded=False):
 
     # Fetch available models from xAI API
     with st.spinner("Loading models..."):
-        available_models = fetch_xai_models()
+        available_models, error_message = fetch_xai_models()
+        if error_message:
+            st.warning(error_message)
 
     # Model selection dropdown
     if st.session_state.model_name not in available_models:
@@ -1084,14 +1098,4 @@ if prompt:
         # Force a rerun to update the UI with the new conversation
         st.rerun()
 
-# Add some information about the app
-st.markdown("---")
-caption_text = """This chat app uses the Grok model from xAI with enhanced Brave Search integration.
-Adjust the reasoning effort in the sidebar to control how deeply Grok thinks about your questions.
-Toggle web search to enable or disable Brave Search integration for more informed responses."""
 
-# Add MCP information if enabled - with more details but without redundant text
-if st.session_state.enable_mcp:
-    caption_text += "\nModel Context Protocol (MCP) is enabled, allowing the AI to access external tools and data sources such as web search, document retrieval, and web scraping. You can see which tools were used by expanding the 'MCP Tools Used' section in each response."
-
-st.caption(caption_text)
