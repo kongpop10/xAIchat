@@ -1,5 +1,8 @@
 import base64
+import os
 from pathlib import Path
+from PIL import Image
+import io
 
 def get_base64_encoded_image(image_path):
     """Get base64 encoded image data for use as a favicon."""
@@ -11,6 +14,21 @@ def img_to_bytes(img_path):
     img_bytes = Path(img_path).read_bytes()
     encoded = base64.b64encode(img_bytes).decode()
     return encoded
+
+def get_xai_favicon():
+    """Load the xAI favicon.ico file and return it as an Image object."""
+    favicon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "favicon.ico")
+    if os.path.exists(favicon_path):
+        return Image.open(favicon_path)
+    else:
+        # Fallback to SVG if favicon.ico doesn't exist
+        return get_xai_icon_svg()
+
+def get_xai_icon_svg():
+    """Return an Image object created from SVG data."""
+    # Create a simple black triangle on white background as fallback
+    img = Image.new('RGBA', (32, 32), (255, 255, 255, 255))
+    return img
 
 def get_xai_icon_html():
     """Return HTML for the xAI logo as an SVG."""

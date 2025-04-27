@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 import requests
 from functools import lru_cache
-from icon import get_xai_icon_html
+from icon import get_xai_favicon
 
 SETTINGS_FILE = "settings.json"
 
@@ -74,11 +74,11 @@ def fetch_xai_models():
 
 settings = load_settings()
 
-# Initialize the Streamlit app with the xAI icon
-xai_icon = get_xai_icon_html()
+# Initialize the Streamlit app with the xAI favicon
+xai_favicon = get_xai_favicon()
 st.set_page_config(
     page_title="Grok Chat",
-    page_icon=xai_icon,  # xAI logo as icon
+    page_icon=xai_favicon,  # xAI favicon as icon
     layout="wide",
     initial_sidebar_state="expanded"
 )
