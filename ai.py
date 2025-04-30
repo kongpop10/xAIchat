@@ -24,13 +24,17 @@ def generate_response(user_message, use_search=True, reasoning_effort="medium", 
     st.session_state.mcp_processing = use_mcp
     st.session_state.mcp_tools_used = []
 
-    # When MCP is enabled, we'll use the actual MCP tools
-    # For now, we're just tracking which tools are being used
+    # When MCP is enabled, get available tools from MCP settings
     if use_mcp:
-        # In a real implementation, this would be populated by the actual MCP framework
-        # For now, we'll just track that we're using search functionality
-        if "search_brave-search" not in st.session_state.mcp_tools_used:
-            st.session_state.mcp_tools_used.append("search_brave-search")
+        # Import here to avoid circular imports
+        from mcp import get_available_mcp_tools, simulate_mcp_tool_usage
+
+        # Get available MCP tools based on current settings
+        available_tools = get_available_mcp_tools()
+
+        # Simulate tool usage based on query content
+        # This will populate st.session_state.mcp_tools_used
+        simulate_mcp_tool_usage(user_message)
 
     # Get current date for AI awareness
     current_date = datetime.now().strftime("%Y-%m-%d")
@@ -54,8 +58,24 @@ Your primary goal is to provide helpful, ACCURATE information that directly addr
     context = ""
     search_metadata = {}
 
-    # Fetch search results if enabled or if MCP is enabled (since MCP uses search tools)
-    if use_search or use_mcp:
+    # Check if we should use Brave Search
+    use_brave_search = use_search
+
+    # Only use Brave Search with MCP if it's not disabled in MCP settings
+    if use_mcp:
+        # Check if Brave Search is available in MCP tools
+        brave_search_available = False
+        for tool in st.session_state.mcp_tools_used:
+            if "search_brave-search" in tool:
+                brave_search_available = True
+                break
+
+        # If Brave Search is not available in MCP tools, don't use it
+        if not brave_search_available:
+            use_brave_search = False
+
+    # Fetch search results if enabled and Brave Search is available
+    if use_brave_search:
         try:
             # Determine optimal search parameters based on query complexity
             query_length = len(user_message.split())
@@ -188,8 +208,9 @@ If MCP tools were used, make sure to incorporate their results in your answer.""
                 elif not any(marker in content for marker in ["[1]", "[2]", "[3]"]):
                     content += "\n\n**Note: The information provided should include citations to the sources above. Please ask for clarification if sources aren't properly cited.**"
 
-            # Add search attribution footer
-            content += f"\n\n---\n*Response generated using Brave Search results on {current_date} for: \"{search_metadata['query']}\"*"
+            # Add search attribution footer only if Brave Search was actually used
+            if use_brave_search:
+                content += f"\n\n---\n*Response generated using Brave Search results on {current_date} for: \"{search_metadata['query']}\"*"
 
         # Add MCP attribution if MCP was used - with tools listed in content when appropriate
         if use_mcp and st.session_state.mcp_tools_used:
