@@ -12,7 +12,7 @@ MCP_SETTINGS_FILE = "mcp_settings.json"
 def load_settings():
     """
     Load application settings from the settings file.
-    
+
     Returns:
         dict: Application settings or empty dict if file doesn't exist or has errors
     """
@@ -27,7 +27,7 @@ def load_settings():
 def save_settings(settings):
     """
     Save application settings to the settings file.
-    
+
     Args:
         settings (dict): Application settings to save
     """
@@ -42,7 +42,7 @@ def load_mcp_settings():
     Load MCP settings from the MCP settings file.
     First tries to load from @mcp_settings.json (user's private file),
     then falls back to regular mcp_settings.json if needed.
-    
+
     Returns:
         dict: MCP settings or empty dict if no files exist or have errors
     """
@@ -74,7 +74,7 @@ def save_mcp_settings(mcp_settings):
     Save MCP settings to the MCP settings file.
     First tries to save to @mcp_settings.json if it exists,
     then falls back to regular mcp_settings.json if needed.
-    
+
     Args:
         mcp_settings (dict): MCP settings to save
     """
@@ -113,7 +113,16 @@ def create_default_mcp_settings():
                     "BRAVE_API_KEY": "your-api-key-here"
                 },
                 "disabled": False,
-                "autoApprove": ["search"]
+                "autoApprove": ["search"],
+                "description": "Web search using Brave Search API"
+            },
+            "firecrawl-mcp": {
+                "command": "node",
+                "args": ["path/to/firecrawl/index.js"],
+                "env": {},
+                "disabled": False,
+                "autoApprove": ["firecrawl_scrape", "firecrawl_crawl", "firecrawl_search", "firecrawl_map", "firecrawl_deep_research"],
+                "description": "Web scraping and crawling"
             }
         }
     }
@@ -138,8 +147,8 @@ DEFAULT_SETTINGS = {
     "enable_mcp": False
 }
 
-# MCP server descriptions
-MCP_SERVER_DESCRIPTIONS = {
+# Default MCP server descriptions (used as fallbacks)
+DEFAULT_MCP_SERVER_DESCRIPTIONS = {
     "brave-search": "Web search using Brave Search API",
     "perplexity-mcp": "AI-powered search and documentation retrieval",
     "tavily-mcp": "AI-powered web search and content extraction",
@@ -147,6 +156,34 @@ MCP_SERVER_DESCRIPTIONS = {
     "fetch": "Web content fetching",
     "github": "GitHub integration",
     "Memory Graph": "Knowledge graph for memory storage",
-    "mcp-reasoner": "Enhanced reasoning capabilities",
+    "mcp-reasoner": "Advanced reasoning for complex tasks",
     "firecrawl-mcp": "Web scraping and crawling"
 }
+
+def get_mcp_server_descriptions(mcp_settings=None):
+    """
+    Get MCP server descriptions from MCP settings.
+    If a server doesn't have a description in the settings, use the default description.
+
+    Args:
+        mcp_settings (dict, optional): MCP settings to extract descriptions from.
+            If None, loads settings from file. Defaults to None.
+
+    Returns:
+        dict: Mapping of server names to descriptions
+    """
+    # If no settings provided, load them
+    if mcp_settings is None:
+        mcp_settings = load_mcp_settings()
+
+    # Start with default descriptions
+    descriptions = DEFAULT_MCP_SERVER_DESCRIPTIONS.copy()
+
+    # Extract descriptions from MCP settings if available
+    if "mcpServers" in mcp_settings:
+        for server_name, server_config in mcp_settings["mcpServers"].items():
+            # If the server has a description in the settings, use it
+            if "description" in server_config:
+                descriptions[server_name] = server_config["description"]
+
+    return descriptions

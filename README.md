@@ -85,6 +85,7 @@ The MCP settings are stored in `mcp_settings.json` in the same format as Claude'
 - **Simple Configuration**: Toggle MCP servers on/off directly in the UI
 - **Advanced Configuration**: Edit the `mcp_settings.json` file for detailed settings
 - **Server Descriptions**: Hover over server names to see descriptions of their capabilities
+- **Custom Descriptions**: Add a `description` field to each server in `mcp_settings.json` to customize descriptions
 
 ### Web Search Integration
 

@@ -10,7 +10,7 @@ import time
 from icon import get_xai_favicon
 from config import (
     load_settings, save_settings, load_mcp_settings, save_mcp_settings,
-    create_default_mcp_settings, MCP_SERVER_DESCRIPTIONS,
+    create_default_mcp_settings, get_mcp_server_descriptions,
     DEFAULT_SETTINGS, MCP_SETTINGS_FILE
 )
 from models import fetch_xai_models
@@ -110,7 +110,7 @@ if st.session_state.enable_mcp:
     setup_mcp_settings_ui(
         st.session_state.enable_mcp,
         st.session_state.mcp_settings,
-        MCP_SERVER_DESCRIPTIONS,
+        get_mcp_server_descriptions(st.session_state.mcp_settings),
         save_mcp_settings
     )
 
@@ -179,21 +179,41 @@ if prompt:
     # Generate and display assistant response
     with st.chat_message("assistant"):
         # Show thinking indicator
-        message_placeholder, thinking_container = show_thinking_indicator(st.session_state.enable_mcp)
+        message_placeholder, thinking_container, tool_status_placeholder = show_thinking_indicator(st.session_state.enable_mcp)
+
+        # Store the tool status placeholder in session state for use by MCP module
+        st.session_state.tool_status_placeholder = tool_status_placeholder
 
         # If this is the first message, set the conversation title based on user input
         if len([m for m in st.session_state.messages if m["role"] == "user"]) == 1:
             st.session_state.conversation_title = prompt[:30] + "..." if len(prompt) > 30 else prompt
 
         # Generate response from Grok with enhanced Brave Search integration and MCP if enabled
-        # Note: If MCP is enabled, we'll use search results regardless of the web search toggle
-        # This ensures MCP tools can provide relevant information
+        # Respect the web search toggle setting even when MCP is enabled
         full_response = generate_response(
             user_message=prompt,
             use_search=st.session_state.enable_web_search,
             reasoning_effort=st.session_state.reasoning_effort,
             use_mcp=st.session_state.enable_mcp
         )
+
+        # Update the tool status placeholder to show completion
+        if 'tool_status_placeholder' in st.session_state:
+            if st.session_state.enable_mcp and full_response.get("mcp_tools_used"):
+                tools_used = ", ".join(full_response["mcp_tools_used"])
+
+                # Show tool results summary
+                if hasattr(st.session_state, 'mcp_tool_results') and st.session_state.mcp_tool_results:
+                    tool_count = len(st.session_state.mcp_tool_results)
+                    result_count = sum(1 for result in st.session_state.mcp_tool_results if result["success"])
+                    st.session_state.tool_status_placeholder.success(f"✅ Response generated using {result_count} successful tool results from: {tools_used}")
+                else:
+                    st.session_state.tool_status_placeholder.success(f"✅ Response generated using: {tools_used}")
+
+                time.sleep(0.5)  # Give users time to see which tools were used
+
+            # Now clear the status
+            st.session_state.tool_status_placeholder.empty()
 
         # Display the response
         message_placeholder.empty()
@@ -214,6 +234,10 @@ if prompt:
         # Add MCP tools used if any
         if st.session_state.enable_mcp and full_response.get("mcp_tools_used"):
             message_data["mcp_tools_used"] = full_response["mcp_tools_used"]
+
+            # Add tool results if available
+            if hasattr(st.session_state, 'mcp_tool_results') and st.session_state.mcp_tool_results:
+                message_data["mcp_tool_results"] = st.session_state.mcp_tool_results
 
         st.session_state.messages.append(message_data)
 

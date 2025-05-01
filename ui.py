@@ -57,12 +57,150 @@ def display_chat_message(message, show_reasoning=False, tool_descriptions=None):
             # Show MCP tools used if available
             if message.get("mcp_tools_used") and len(message["mcp_tools_used"]) > 0:
                 with st.expander("MCP Tools Used"):
+                    st.markdown("### Tools Used for This Response")
                     # Display tools with descriptions in a compact format
                     for tool in message["mcp_tools_used"]:
                         description = tool_descriptions.get(tool, "External tool integration") if tool_descriptions else "External tool integration"
                         st.markdown(f"**{tool}**: {description}")
 
-                    st.caption("These tools provide access to external data sources for more accurate information.")
+                    # Display tool results if available in the message
+                    if message.get("mcp_tool_results"):
+                        st.markdown("---")
+                        st.markdown("### Tool Results")
+                        for result in message["mcp_tool_results"]:
+                            st.markdown(f"**Tool**: {result['tool']}")
+                            if result["success"]:
+                                if isinstance(result['data'], list):
+                                    st.markdown("**Results**:")
+                                    for i, item in enumerate(result['data'][:3]):  # Show only first 3 results
+                                        if isinstance(item, dict):
+                                            st.markdown(f"- {item.get('title', 'No title')}")
+                                    if len(result['data']) > 3:
+                                        st.caption(f"...and {len(result['data']) - 3} more results")
+                                elif isinstance(result['data'], dict) and 'success' in result['data'] and result['data']['success']:
+                                    # Format web scraping results
+                                    if 'url' in result['data'] and 'title' in result['data'] and 'content' in result['data']:
+                                        # Single page scrape result
+                                        st.markdown(f"**Scraped content from**: [{result['data']['title']}]({result['data']['url']})")
+
+                                        # Show content directly with a toggle button
+                                        show_content_key = f"show_scraped_content_{result['tool']}_{id(result)}"
+                                        if show_content_key not in st.session_state:
+                                            st.session_state[show_content_key] = False
+
+                                        # Toggle button to show/hide content
+                                        if st.button("Toggle Scraped Content", key=f"toggle_{show_content_key}"):
+                                            st.session_state[show_content_key] = not st.session_state[show_content_key]
+
+                                        # Display content if toggled on
+                                        if st.session_state[show_content_key]:
+                                            st.markdown("**Scraped Content:**")
+                                            st.markdown(result['data']['content'])
+
+                                            # Add links if available
+                                            if 'links' in result['data'] and result['data']['links']:
+                                                st.markdown("**Links from the page:**")
+                                                for i, link in enumerate(result['data']['links'][:5]):
+                                                    st.markdown(f"- [{link.get('text', 'Link')}]({link.get('url', '')})")
+
+                                    elif 'pages' in result['data'] and result['data']['pages']:
+                                        # Multi-page crawl result
+                                        st.markdown(f"**Crawled content from**: {result['data']['base_url']}")
+                                        st.markdown(f"**Pages crawled**: {len(result['data']['pages'])}")
+
+                                        # Show content directly with a toggle button
+                                        show_content_key = f"show_crawled_content_{result['tool']}_{id(result)}"
+                                        if show_content_key not in st.session_state:
+                                            st.session_state[show_content_key] = False
+
+                                        # Toggle button to show/hide content
+                                        if st.button("Toggle Crawled Content", key=f"toggle_{show_content_key}"):
+                                            st.session_state[show_content_key] = not st.session_state[show_content_key]
+
+                                        # Display content if toggled on
+                                        if st.session_state[show_content_key]:
+                                            st.markdown("**Crawled Content:**")
+                                            for i, page in enumerate(result['data']['pages'][:3]):
+                                                st.markdown(f"**Page {i+1}**: [{page.get('title', 'No title')}]({page.get('url', 'No URL')})")
+                                                st.markdown(page.get('content', 'No content available'))
+                                                st.markdown("---")
+                                    else:
+                                        st.markdown(f"**Result**: {str(result['data'])[:100]}...")
+                                else:
+                                    st.markdown(f"**Result**: {str(result['data'])[:100]}...")
+                            else:
+                                st.markdown(f"**Error**: {result['error']}")
+                            st.markdown("---")
+                    # Fallback to session state if message doesn't have tool results
+                    elif "mcp_tool_results" in st.session_state and st.session_state.mcp_tool_results:
+                        st.markdown("---")
+                        st.markdown("### Tool Results")
+                        for result in st.session_state.mcp_tool_results:
+                            st.markdown(f"**Tool**: {result['tool']}")
+                            if result["success"]:
+                                if isinstance(result['data'], list):
+                                    st.markdown("**Results**:")
+                                    for i, item in enumerate(result['data'][:3]):  # Show only first 3 results
+                                        if isinstance(item, dict):
+                                            st.markdown(f"- {item.get('title', 'No title')}")
+                                    if len(result['data']) > 3:
+                                        st.caption(f"...and {len(result['data']) - 3} more results")
+                                elif isinstance(result['data'], dict) and 'success' in result['data'] and result['data']['success']:
+                                    # Format web scraping results
+                                    if 'url' in result['data'] and 'title' in result['data'] and 'content' in result['data']:
+                                        # Single page scrape result
+                                        st.markdown(f"**Scraped content from**: [{result['data']['title']}]({result['data']['url']})")
+
+                                        # Show content directly with a toggle button
+                                        show_content_key = f"show_scraped_content_{result['tool']}_{id(result)}"
+                                        if show_content_key not in st.session_state:
+                                            st.session_state[show_content_key] = False
+
+                                        # Toggle button to show/hide content
+                                        if st.button("Toggle Scraped Content", key=f"toggle_{show_content_key}"):
+                                            st.session_state[show_content_key] = not st.session_state[show_content_key]
+
+                                        # Display content if toggled on
+                                        if st.session_state[show_content_key]:
+                                            st.markdown("**Scraped Content:**")
+                                            st.markdown(result['data']['content'])
+
+                                            # Add links if available
+                                            if 'links' in result['data'] and result['data']['links']:
+                                                st.markdown("**Links from the page:**")
+                                                for i, link in enumerate(result['data']['links'][:5]):
+                                                    st.markdown(f"- [{link.get('text', 'Link')}]({link.get('url', '')})")
+
+                                    elif 'pages' in result['data'] and result['data']['pages']:
+                                        # Multi-page crawl result
+                                        st.markdown(f"**Crawled content from**: {result['data']['base_url']}")
+                                        st.markdown(f"**Pages crawled**: {len(result['data']['pages'])}")
+
+                                        # Show content directly with a toggle button
+                                        show_content_key = f"show_crawled_content_{result['tool']}_{id(result)}"
+                                        if show_content_key not in st.session_state:
+                                            st.session_state[show_content_key] = False
+
+                                        # Toggle button to show/hide content
+                                        if st.button("Toggle Crawled Content", key=f"toggle_{show_content_key}"):
+                                            st.session_state[show_content_key] = not st.session_state[show_content_key]
+
+                                        # Display content if toggled on
+                                        if st.session_state[show_content_key]:
+                                            st.markdown("**Crawled Content:**")
+                                            for i, page in enumerate(result['data']['pages'][:3]):
+                                                st.markdown(f"**Page {i+1}**: [{page.get('title', 'No title')}]({page.get('url', 'No URL')})")
+                                                st.markdown(page.get('content', 'No content available'))
+                                                st.markdown("---")
+                                    else:
+                                        st.markdown(f"**Result**: {str(result['data'])[:100]}...")
+                                else:
+                                    st.markdown(f"**Result**: {str(result['data'])[:100]}...")
+                            else:
+                                st.markdown(f"**Error**: {result['error']}")
+                            st.markdown("---")
+
+                    st.caption("These tools were used to enhance the response with external data sources and capabilities.")
 
 def show_thinking_indicator(enable_mcp=False):
     """
@@ -72,7 +210,7 @@ def show_thinking_indicator(enable_mcp=False):
         enable_mcp (bool, optional): Whether MCP is enabled. Defaults to False.
 
     Returns:
-        tuple: (message_placeholder, thinking_container) for updating later
+        tuple: (message_placeholder, thinking_container, tool_status_placeholder) for updating later
     """
     # Create placeholders for the message and thinking indicators
     message_placeholder = st.empty()
@@ -82,12 +220,18 @@ def show_thinking_indicator(enable_mcp=False):
     with thinking_container:
         message_placeholder.markdown("Processing your request...")
 
-        # Add a small spinner if MCP is enabled
+        # Create a placeholder for tool status updates with a default message
+        tool_status_placeholder = st.empty()
+
+        # If MCP is enabled, show a waiting message for tools
         if enable_mcp:
+            tool_status_placeholder.info("Selecting appropriate tools...")
+
+            # Add a small spinner
             with st.spinner(""):
                 time.sleep(0.1)  # Just to ensure the spinner appears
 
-    return message_placeholder, thinking_container
+    return message_placeholder, thinking_container, tool_status_placeholder
 
 def setup_sidebar_model_settings(reasoning_effort, show_reasoning, model_name, available_models, settings, save_settings_fn):
     """
@@ -276,7 +420,8 @@ def setup_mcp_settings_ui(enable_mcp, mcp_settings, mcp_server_descriptions, sav
                         "BRAVE_API_KEY": "your-api-key-here"
                       },
                       "disabled": false,
-                      "autoApprove": ["search"]
+                      "autoApprove": ["search"],
+                      "description": "Custom description for Brave Search"
                     }
                   }
                 }
