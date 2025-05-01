@@ -27,7 +27,7 @@ def generate_response(user_message, use_search=True, reasoning_effort="medium", 
     # When MCP is enabled, get available tools from MCP settings
     if use_mcp:
         # Import here to avoid circular imports
-        from mcp import get_available_mcp_tools, simulate_mcp_tool_usage
+        from mcp import get_available_mcp_tools, simulate_mcp_tool_usage, get_mcp_system_instructions
 
         # Get available MCP tools based on current settings
         available_tools = get_available_mcp_tools()
@@ -54,14 +54,23 @@ CRITICAL INSTRUCTIONS:
 Your primary goal is to provide helpful, ACCURATE information that directly addresses what the user is asking.
 """
 
+    # Add MCP system instructions if MCP is enabled
+    if use_mcp:
+        # Get MCP system instructions
+        mcp_instructions = get_mcp_system_instructions()
+        grok_system_prompt += mcp_instructions
+
+        # Add instruction to separate tool reasoning from main response
+        grok_system_prompt += "\n\nIMPORTANT: When using MCP tools, DO NOT incorporate the tool reasoning directly into your main response text. Instead, place tool results in a separate section at the end of your response."
+
     # Initialize context and search metadata
     context = ""
     search_metadata = {}
 
-    # Check if we should use Brave Search
+    # Check if we should use Brave Search - respect the web search toggle
     use_brave_search = use_search
 
-    # Only use Brave Search with MCP if it's not disabled in MCP settings
+    # Only use Brave Search with MCP if it's not disabled in MCP settings and web search is enabled
     if use_mcp:
         # Check if Brave Search is available in MCP tools
         brave_search_available = False
@@ -70,8 +79,8 @@ Your primary goal is to provide helpful, ACCURATE information that directly addr
                 brave_search_available = True
                 break
 
-        # If Brave Search is not available in MCP tools, don't use it
-        if not brave_search_available:
+        # If Brave Search is not available in MCP tools or web search is disabled, don't use it
+        if not brave_search_available or not use_search:
             use_brave_search = False
 
     # Fetch search results if enabled and Brave Search is available
@@ -212,16 +221,17 @@ If MCP tools were used, make sure to incorporate their results in your answer.""
             if use_brave_search:
                 content += f"\n\n---\n*Response generated using Brave Search results on {current_date} for: \"{search_metadata['query']}\"*"
 
-        # Add MCP attribution if MCP was used - with tools listed in content when appropriate
+        # Add MCP attribution if MCP was used - always in a separate section at the end
         if use_mcp and st.session_state.mcp_tools_used:
-            # Add a Tools Used section if there's no References section
-            if "References" not in content and "REFERENCES" not in content and "references" not in content.lower():
+            # Always add a Tools Used section at the end
+            if "## Tools Used" not in content and "## TOOLS USED" not in content:
                 content += "\n\n## Tools Used\n"
                 for tool in st.session_state.mcp_tools_used:
                     content += f"- {tool}\n"
 
-            # No footer for MCP tools - information is available in the expandable section
-            pass
+            # Add a note to ensure tool reasoning is separated from main content
+            if "mcp-reasoner" in " ".join(st.session_state.mcp_tools_used):
+                content += "\n\n---\n*Note: Tool reasoning is provided in this separate section and should not be incorporated into the main response text.*"
         elif use_mcp:
             # Only add a note if no tools were used but MCP was enabled
             content += f"\n\n---\n*Note: MCP was enabled but no specific tools were used for this query*"

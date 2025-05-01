@@ -20,7 +20,10 @@ def get_mcp_tool_descriptions():
         "firecrawl_crawl_firecrawl-mcp": "Website crawling and analysis",
         "deep-research_Serper-search-mcp": "In-depth research across multiple sources",
         "tavily-search_tavily-mcp": "AI-powered web search",
-        "chat_perplexity_perplexity-mcp": "Conversational AI from Perplexity"
+        "chat_perplexity_perplexity-mcp": "Conversational AI from Perplexity",
+        "breakdown_complex_task_mcp-reasoner": "Break down complex tasks into manageable steps",
+        "solve_equations_mcp-reasoner": "Solve mathematical equations and formulas",
+        "analyze_problem_mcp-reasoner": "Analyze complex problems with structured reasoning"
     }
 
     # Get MCP settings
@@ -91,15 +94,89 @@ def get_available_mcp_tools():
 
     # If no tools are available, use default tools for simulation
     if not available_tools:
-        available_tools = [
-            "search_brave-search",
+        # Create a list of default tools, excluding Brave Search if it's disabled
+        default_tools = []
+
+        # Only add Brave Search if it's not explicitly disabled
+        brave_search_disabled = False
+        if "mcpServers" in st.session_state.mcp_settings and "brave-search" in st.session_state.mcp_settings["mcpServers"]:
+            brave_search_disabled = st.session_state.mcp_settings["mcpServers"]["brave-search"].get("disabled", False)
+
+        if not brave_search_disabled:
+            default_tools.append("search_brave-search")
+
+        # Add other default tools
+        default_tools.extend([
             "tavily-search_tavily-mcp",
             "get_documentation_perplexity-mcp",
             "firecrawl_scrape_firecrawl-mcp",
             "deep-research_Serper-search-mcp"
-        ]
+        ])
+
+        available_tools = default_tools
 
     return available_tools
+
+def get_available_mcp_servers():
+    """
+    Get a list of available MCP servers based on the current MCP settings.
+
+    Returns:
+        list: List of available MCP server names
+    """
+    available_servers = []
+
+    # Extract available servers from MCP settings
+    if "mcpServers" in st.session_state.mcp_settings:
+        for server_name, server_config in st.session_state.mcp_settings["mcpServers"].items():
+            # Skip disabled servers
+            if server_config.get("disabled", False):
+                continue
+
+            # Add server to available servers list
+            available_servers.append(server_name)
+
+    return available_servers
+
+def get_mcp_system_instructions():
+    """
+    Generate system instructions about available MCP tools.
+
+    Returns:
+        str: System instructions about available MCP tools
+    """
+    available_servers = get_available_mcp_servers()
+    available_tools = get_available_mcp_tools()
+
+    if not available_servers:
+        return ""
+
+    # Create instructions about available MCP tools
+    instructions = "\n\nAvailable MCP tools:\n"
+
+    # Add information about each server
+    for server in available_servers:
+        # Get tools for this server
+        server_tools = [t for t in available_tools if server in t]
+
+        if server_tools:
+            # Get server description from config if available
+            from config import MCP_SERVER_DESCRIPTIONS
+            server_desc = MCP_SERVER_DESCRIPTIONS.get(server, f"{server} integration")
+
+            # Add server information
+            instructions += f"- {server}: {server_desc}\n"
+
+            # Add tool information for this server
+            tool_descriptions = get_mcp_tool_descriptions()
+            for tool in server_tools:
+                tool_desc = tool_descriptions.get(tool, tool.replace("_", " ").capitalize())
+                instructions += f"  - {tool}: {tool_desc}\n"
+
+    # Add usage instructions
+    instructions += "\nTo use a specific MCP tool, include 'Use [tool-name]' in your query. For example: 'Use mcp-reasoner to solve this equation'.\n"
+
+    return instructions
 
 def simulate_mcp_tool_usage(query):
     """
@@ -119,29 +196,118 @@ def simulate_mcp_tool_usage(query):
     # Create a status placeholder for real-time updates
     status_placeholder = st.empty()
 
-    # Simulate MCP server initialization
-    status_placeholder.info("Processing...")
-    time.sleep(1)  # Simulate initialization time
+    # Don't show any processing message initially - only show when a tool is actually used
+    time.sleep(0.5)  # Small delay for initialization
 
-    # Get available MCP tools
+    # Get available MCP tools and servers
     available_tools = get_available_mcp_tools()
+    available_servers = get_available_mcp_servers()
 
-    # Simulate tool usage based on query content and available tools
-    # Try to use search for any query if available
-    search_tools = [t for t in available_tools if "search" in t.lower()]
-    if search_tools:
-        status_placeholder.info(f"Using search tool...")
-        time.sleep(1)  # Simulate processing time
-        tools_used.append(search_tools[0])  # Use the first available search tool
-        # Update session state immediately for UI feedback
-        st.session_state.mcp_tools_used = tools_used.copy()
+    # Check if the user explicitly requested a specific MCP tool
+    explicit_tool_request = None
+    query_lower = query.lower()
 
-        # Store the fact that we're using search in session state
-        # This will be used by the AI module to ensure search results are incorporated
-        st.session_state.mcp_using_search = True
+    # Check for explicit MCP tool requests in the query
+    for server in available_servers:
+        if f"use {server.lower()}" in query_lower:
+            explicit_tool_request = server
+            break
+
+    # If there's an explicit tool request, prioritize it
+    if explicit_tool_request:
+        # Find all tools from the requested MCP server
+        requested_tools = [t for t in available_tools if explicit_tool_request in t]
+
+        if requested_tools:
+            # For mcp-reasoner, select the appropriate function based on the query
+            if explicit_tool_request == "mcp-reasoner":
+                if "breakdown" in query_lower or "complex task" in query_lower:
+                    reasoner_tools = [t for t in requested_tools if "breakdown_complex_task" in t]
+                    if reasoner_tools:
+                        status_placeholder.info(f"Using MCP Reasoner for complex task breakdown...")
+                        time.sleep(1.5)
+                        tools_used.append(reasoner_tools[0])
+                elif "equation" in query_lower or "formula" in query_lower or "math" in query_lower:
+                    reasoner_tools = [t for t in requested_tools if "solve_equations" in t]
+                    if reasoner_tools:
+                        status_placeholder.info(f"Using MCP Reasoner for equation solving...")
+                        time.sleep(1.5)
+                        tools_used.append(reasoner_tools[0])
+                else:
+                    # Default to the first available reasoner tool
+                    status_placeholder.info(f"Using MCP Reasoner...")
+                    time.sleep(1.5)
+                    tools_used.append(requested_tools[0])
+            else:
+                # For other MCP servers, just use the first available tool
+                status_placeholder.info(f"Using requested MCP tool: {explicit_tool_request}...")
+                time.sleep(1.5)
+                tools_used.append(requested_tools[0])
+
+            # Update session state immediately for UI feedback
+            st.session_state.mcp_tools_used = tools_used.copy()
+
+            # If we've found and used the explicitly requested tool, we can skip the rest
+            # of the tool selection logic unless it's a search tool (we might want both)
+            if not "search" in requested_tools[0].lower():
+                # Show completion message if tools were used
+                if tools_used:
+                    status_placeholder.success("Processing complete")
+                    time.sleep(0.5)
+
+                # Always clear the status message
+                status_placeholder.empty()
+                return tools_used
+
+    # If no explicit tool was requested or we want to add more tools,
+    # continue with the regular tool selection logic
+
+    # Try to use search for any query if available, web search is enabled, and no tools have been selected yet
+    if not tools_used and st.session_state.get("enable_web_search", False):
+        search_tools = [t for t in available_tools if "search" in t.lower()]
+        if search_tools:
+            status_placeholder.info(f"Using search tool...")
+            time.sleep(1)  # Simulate processing time
+            tools_used.append(search_tools[0])  # Use the first available search tool
+            # Update session state immediately for UI feedback
+            st.session_state.mcp_tools_used = tools_used.copy()
+
+            # Store the fact that we're using search in session state
+            # This will be used by the AI module to ensure search results are incorporated
+            st.session_state.mcp_using_search = True
+
+    # Check for complex tasks, equations, or physics problems that would benefit from mcp-reasoner
+    if ("equation" in query_lower or "formula" in query_lower or
+        "physics" in query_lower or "mathematics" in query_lower or
+        "complex task" in query_lower or "breakdown" in query_lower or
+        "over-unity" in query_lower or "parametric" in query_lower):
+
+        reasoner_tools = [t for t in available_tools if "mcp-reasoner" in t]
+        if reasoner_tools:
+            # Select the appropriate reasoner function
+            if "breakdown" in query_lower or "complex task" in query_lower:
+                breakdown_tools = [t for t in reasoner_tools if "breakdown_complex_task" in t]
+                if breakdown_tools:
+                    status_placeholder.info("Breaking down complex task...")
+                    time.sleep(2)  # Simulate processing time
+                    tools_used.append(breakdown_tools[0])
+            elif "equation" in query_lower or "formula" in query_lower:
+                equation_tools = [t for t in reasoner_tools if "solve_equations" in t]
+                if equation_tools:
+                    status_placeholder.info("Solving equations...")
+                    time.sleep(2)  # Simulate processing time
+                    tools_used.append(equation_tools[0])
+            else:
+                # Default to the first available reasoner tool
+                status_placeholder.info("Analyzing problem with MCP Reasoner...")
+                time.sleep(2)  # Simulate processing time
+                tools_used.append(reasoner_tools[0])
+
+            # Update session state immediately for UI feedback
+            st.session_state.mcp_tools_used = tools_used.copy()
 
     # Add news-specific tools for news-related queries
-    if ("news" in query.lower() or "latest" in query.lower() or "recent" in query.lower()):
+    if ("news" in query_lower or "latest" in query_lower or "recent" in query_lower):
         news_tools = [t for t in available_tools if "news" in t.lower() or "tavily" in t.lower()]
         if news_tools and news_tools[0] not in tools_used:
             status_placeholder.info("Retrieving latest news...")
@@ -151,7 +317,7 @@ def simulate_mcp_tool_usage(query):
             st.session_state.mcp_tools_used = tools_used.copy()
 
     # Add code-specific tools for code-related queries
-    if "code" in query.lower() or "programming" in query.lower():
+    if "code" in query_lower or "programming" in query_lower:
         code_tools = [t for t in available_tools if "documentation" in t.lower() or "perplexity" in t.lower()]
         if code_tools and code_tools[0] not in tools_used:
             status_placeholder.info("Retrieving code documentation...")
@@ -161,7 +327,7 @@ def simulate_mcp_tool_usage(query):
             st.session_state.mcp_tools_used = tools_used.copy()
 
     # Add web-specific tools for web-related queries
-    if "web" in query.lower() or "website" in query.lower() or "crawl" in query.lower():
+    if "web" in query_lower or "website" in query_lower or "crawl" in query_lower:
         web_tools = [t for t in available_tools if "scrape" in t.lower() or "crawl" in t.lower() or "firecrawl" in t.lower()]
         if web_tools and web_tools[0] not in tools_used:
             status_placeholder.info("Crawling website content...")
@@ -171,7 +337,7 @@ def simulate_mcp_tool_usage(query):
             st.session_state.mcp_tools_used = tools_used.copy()
 
     # Add research-specific tools for research-related queries
-    if "research" in query.lower() or "analyze" in query.lower() or "disaster" in query.lower():
+    if "research" in query_lower or "analyze" in query_lower or "disaster" in query_lower:
         research_tools = [t for t in available_tools if "research" in t.lower() or "serper" in t.lower()]
         if research_tools and research_tools[0] not in tools_used:
             status_placeholder.info("Performing deep research...")
@@ -180,13 +346,12 @@ def simulate_mcp_tool_usage(query):
             # Update session state immediately for UI feedback
             st.session_state.mcp_tools_used = tools_used.copy()
 
-    # Show completion message if tools were used
+    # Only show completion message if tools were actually used
     if tools_used:
         status_placeholder.success("Processing complete")
-    else:
-        status_placeholder.info("Processing complete")
+        time.sleep(0.5)  # Give user time to see the final status
 
-    time.sleep(0.5)  # Give user time to see the final status
-    status_placeholder.empty()  # Clear the status message
+    # Always clear the status message at the end
+    status_placeholder.empty()
 
     return tools_used
